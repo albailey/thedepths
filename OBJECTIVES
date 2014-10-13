@@ -1,0 +1,82 @@
+==========================================================================================
+
+0.1:
+------
+- Need a simple room generator
+- Need to support drawing the generated rooms
+- Need simple movement/clipping
+- Need interaction with stairs
+COMPLETED  Sept 12, 2014
+==========================================================================================
+
+0.2:
+-------
+- Need to add fog ( a way to restrict visibility)
+COMPLETED  Sept 21, 2014
+==========================================================================================
+
+0.3:
+-------
+- Need to add treasure to generator
+- Need to interact with treasure
+- Need to show treasure/score 
+
+KNOWN BUGS:  
+   Screen stutters
+   Lost my stairs
+   Score not updating
+==========================================================================================
+
+0.4:
+-------
+- Need to add immobile monsters to generator
+- Need to interact with monsters
+- Need to add health and attack
+
+
+0.5:
+-------
+- Need to add AI and movement to monsters
+
+0.6:
+-------
+- Better tiles
+- Need to add display for health (sprites)
+- Need to add display for ammo (sprites)
+- Need to add display for level 
+
+0.7:
+-------
+- Title screen
+- Better starting level random seed (based on title screen interaction)
+- Death screen
+
+0.8:
+-------
+- Sound FX
+
+
+==========================================================================================
+---- STRETCH --- 
+==========================================================================================
+
+0.9:
+-------
+* - Need to support saving and re-loading levels
+
+0.10:
+-------
+- Alternative modes:
+  - STATUS page (XP, etc..)
+  - Inventory 
+  - Achievements  (most powerful creature defeated, lowest level, time played, etc..)
+
+
+==========================================================================================
+==========================================================================================
+
+Other ideas
+-----------------------------------
+- Need to support 2 direction scrolling. *** difficult ***
+- Need to expand room generator and drawing util for larger than 1 screen.
+- Inventory (different weapons, food, skills, etc..)
