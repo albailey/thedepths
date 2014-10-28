@@ -17,6 +17,8 @@
 // ==================== CONSTANTS ============================================
 
 //  GAME FEATURES
+//#define DEV_MODE 1
+
 #define FOG_MODE 1
 
 //-------------------------------------- UNUSED
@@ -71,6 +73,17 @@
 #define UNSET 0x0F
 
 #define FOG_TILE 10
+
+// Sound effects
+#define LEVEL_SOUND 1
+#define LEVEL_CHANNEL 2
+
+#define TREASURE_SOUND 2
+#define TREASURE_CHANNEL 2
+
+#define REVEAL_ROOM_SOUND 3
+#define REVEAL_ROOM_CHANNEL 2
+
 
 // for displaying health, level and score
 // We may show health and scores using different sprites (ie: hearts)
@@ -136,13 +149,11 @@ const unsigned char palSprites[16]={
 };
 
 // Starts placing the 3 digit level at coordinates: 4,2  .. 6,2
-#define LAST_LEVEL_SPRITE_POS  8
-static unsigned char level_oam[3*3];
-const unsigned char level_placement[3*3]={
-        MSB(NTADR(4,2)),LSB(NTADR(4,2)),0,
-        MSB(NTADR(5,2)),LSB(NTADR(5,2)),0,
-        MSB(NTADR(6,2)),LSB(NTADR(6,2)),0,
-};
+// NTADR(4,2)
+#define LEVEL_POSITION_X 4
+#define LEVEL_POSITION_Y 2
+#define NUM_LEVEL_SPRITES 3
+static unsigned char level_oam[NUM_LEVEL_SPRITES];
 
 // Starts placing the 5 digit score at coordinates: 8,2  .. 12,2
 // 2 treasure bytes means a max score of 64k (which is 5 digits)
@@ -286,15 +297,16 @@ void createRoom(signed char gridx, signed char gridy) {
 void updateLevelSprites(){
     // 3 digit level. 
     int x = level;
-    signed char pos = LAST_LEVEL_SPRITE_POS;
-    while( x > 0 ) {
-       level_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
-       x = x / 10;
-       pos -=3;
-    }
-    while(pos > 0) {
-       level_oam[pos] = BLANK_SPRITE;
-       pos -=3;
+    signed char pos = NUM_LEVEL_SPRITES-1;
+
+    while(pos >=0 ) {
+      if(x > 0) {
+        level_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
+        x = x / 10;
+       } else {
+         level_oam[pos] = BLANK_SPRITE;
+       }
+      --pos;
     }
 
 }
@@ -303,14 +315,19 @@ void updateTreasureSprites(){
     // 5 digit health. 
     int x = score;
     signed char pos = LAST_SCORE_SPRITE_POS;
-    while( x >= 10 ) {
-       score_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
-       x = x / 10;
-       pos -=3;
-    }
-    while(pos > 0) {
-       score_oam[pos] = BLANK_SPRITE;
-       pos -=3;
+    // always draw first digit
+    score_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
+    x = x / 10;
+    pos -=3;
+    // conditionally draw the rest
+    while(pos >=0 ) {
+      if ( x > 0 ) {
+         score_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
+         x = x / 10;
+      } else {
+         score_oam[pos] = BLANK_SPRITE;
+      }
+      pos -=3;
     }
 }
 
@@ -441,7 +458,9 @@ void fillRoom(signed char gridx, signed char gridy) {
     // clear the random value
     room_grid[gridx][gridy] = EMPTY;
     // calculate what the new item is
-    grid[u][v] = getRandomItem();
+    setAndDraw(u,v,getRandomItem());
+  } else {
+    setAndDraw(u,v,w);
   }
   vram_adr(NTADR(u,v)); 
   vram_put(grid[u][v]);
@@ -470,18 +489,20 @@ void drawLevel(unsigned char target) {
            // this only draws one room. the rest are fogged
            fillRoom(i, j);
            break;
-         }
-#else
         }
+#else
         // this draws all rooms. fig disabled 
         fillRoom(i, j);
+        }
 #endif
      }
   }
-  // Update level sprites
-  set_vram_update(3,level_oam);
-  // Update score sprites
-  set_vram_update(5,score_oam);
+  // Draw text info:
+  vram_adr(NTADR(LEVEL_POSITION_X, LEVEL_POSITION_Y));
+  for(j=0; j<NUM_LEVEL_SPRITES; j++) {
+      vram_put(level_oam[j]);
+  }
+    
 }
 
 
@@ -498,7 +519,10 @@ void loadLevel(unsigned char startObj, unsigned char endObj)
    generateLevel(startObj, endObj);
    drawLevel(startObj);
 
+   // Update score sprites
+   set_vram_update(5,score_oam);
    ppu_on_all();
+   sfx_play(LEVEL_SOUND, LEVEL_CHANNEL);
 }
 
 void generateStartingLevel() {
@@ -537,14 +561,13 @@ void gameOver() {
 unsigned char clipCheck(unsigned char x, unsigned char y) {
   return grid[x>>3][y>>3];
 }
-void playEffect(unsigned char effectID) {
-  // TODO: add sound effects
-}
+
 
 void claimTreasure(unsigned char tx, unsigned char ty) {
   // random amount of treasure based on the level
   score += ((rand8() % level)+1);
-  playEffect(TREASURE);
+  updateTreasureSprites();
+  sfx_play(TREASURE_SOUND, TREASURE_CHANNEL);
   // clear the treasure value
   setAndDraw(tx,ty,EMPTY);
 }
@@ -555,6 +578,7 @@ void revealRoom(unsigned char px, unsigned char py) {
   ppu_off();
   fillRoom(roomX,roomY);
   ppu_on_all();
+  sfx_play(REVEAL_ROOM_SOUND, REVEAL_ROOM_CHANNEL);
 }
 
 void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
@@ -720,9 +744,6 @@ void main(void)
         player_power = INITIAL_POWER;
         score = 0;
 
-        // level does not need to be updated (until a new level is loaded)
-        memcpy(level_oam,level_placement,sizeof(level_placement));
-
         // score changes as we run around the level
         memcpy(score_oam,score_placement,sizeof(score_placement));
 
@@ -769,6 +790,8 @@ void main(void)
                   processGame();
                 }
 
+#ifdef DEV_MODE
 		showLine();
+#endif
 	}
 }

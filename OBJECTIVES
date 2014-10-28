@@ -21,10 +21,12 @@ COMPLETED  Sept 21, 2014
 - Need to interact with treasure
 - Need to show treasure/score 
 
-KNOWN BUGS:  
-   Screen stutters
-   Lost my stairs
-   Score not updating
+KNOWN BUGS: 
+   Need to fix stairs on initial LEVEL. Look weird,
+   Screen stutters when getting treasure.
+   Treasure sometimes not getting eaten (related to stutter)
+
+COMPLETED Oct 27, 2014
 ==========================================================================================
 
 0.4:
@@ -54,6 +56,10 @@ KNOWN BUGS:
 0.8:
 -------
 - Sound FX
+(Started adding this  Oct 22, 2014)
+Sounds added:
+- Treasure
+- Room Reveal
 
 
 ==========================================================================================
