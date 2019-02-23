@@ -491,9 +491,9 @@ void drawLevel(unsigned char target) {
            break;
         }
 #else
-        // this draws all rooms. fig disabled 
-        fillRoom(i, j);
         }
+        // this draws all rooms. fog disabled 
+        fillRoom(i, j);
 #endif
      }
   }
