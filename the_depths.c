@@ -84,6 +84,9 @@
 #define REVEAL_ROOM_SOUND 3
 #define REVEAL_ROOM_CHANNEL 2
 
+#define ERROR_SOUND 4
+#define ERROR_CHANNEL 2
+
 
 // for displaying health, level and score
 // We may show health and scores using different sprites (ie: hearts)
@@ -136,6 +139,13 @@ static signed char crawlHead;
 static signed char crawlTail;
 unsigned char crawlStack[ROOMS_WIDE * ROOMS_HIGH * 2];
 
+// This is a update-per-frame queue for VRAM
+// It splits many updates during vblank over several
+// frame updates
+#define SIZEOF_QUEUE 120
+unsigned char* vram_read_ptr;
+unsigned char* vram_write_ptr;
+unsigned char vram_queue[SIZEOF_QUEUE];
 
 
 
@@ -388,9 +398,20 @@ void generateLevel(unsigned char startObj, unsigned char endObj)
 
 
 void setAndDraw(signed char u, signed char v, signed char val) {
+    if(vram_write_ptr +3 == vram_read_ptr) {
+      // queue is full.  Cannot add more to it
+      // until we process some of what is queued up
+      sfx_play(ERROR_SOUND, ERROR_CHANNEL);
+      return;
+    }
     grid[u][v] = val;
-    vram_adr(NTADR(u,v)); 
-    vram_put(val);
+    *(vram_write_ptr++) = MSB(NTADR(u,v));
+    *(vram_write_ptr++) = LSB(NTADR(u,v));
+    *(vram_write_ptr++) = val;
+    // If we reach the end, wrap around to the start.
+    if(vram_write_ptr >= (vram_queue + SIZEOF_QUEUE)) {
+      vram_write_ptr = vram_queue;
+    }
 }
 
 unsigned char getRandomItem() {
@@ -566,19 +587,19 @@ unsigned char clipCheck(unsigned char x, unsigned char y) {
 void claimTreasure(unsigned char tx, unsigned char ty) {
   // random amount of treasure based on the level
   score += ((rand8() % level)+1);
-  updateTreasureSprites();
-  sfx_play(TREASURE_SOUND, TREASURE_CHANNEL);
-  // clear the treasure value
+  // clear the treasure from the screen
   setAndDraw(tx,ty,EMPTY);
+  // update the overall amount of gold the player has
+  updateTreasureSprites();
+  // indicate using sound that we got some treasure
+  sfx_play(TREASURE_SOUND, TREASURE_CHANNEL);
 }
 
 void revealRoom(unsigned char px, unsigned char py) {
   signed char roomX = ((px >> 3)-LEFT_BORDER) / ROOM_WIDTH; 
   signed char roomY = ((py >> 3)-TOP_BORDER) / ROOM_HEIGHT; 
-  ppu_off();
-  fillRoom(roomX,roomY);
-  ppu_on_all();
   sfx_play(REVEAL_ROOM_SOUND, REVEAL_ROOM_CHANNEL);
+  fillRoom(roomX,roomY);
 }
 
 void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
@@ -715,14 +736,33 @@ void updatePowerSprites(){
 
 
 void showStatusSprites(){
- // shows level, health and treasure
+ if(vram_read_ptr != vram_write_ptr){
+   if(vram_read_ptr + 9 < vram_write_ptr){
+     set_vram_update(3,vram_read_ptr);
+     vram_read_ptr += 9;
+   } else if(vram_read_ptr + 6 < vram_write_ptr){
+     set_vram_update(2,vram_read_ptr);
+     vram_read_ptr += 6;
+   } else {
+     set_vram_update(1,vram_read_ptr);
+     vram_read_ptr += 3;
+   }
+   if(vram_read_ptr > vram_queue + SIZEOF_QUEUE) {
+     vram_read_ptr = vram_queue;
+   }
+ } else {
+   // show the score.  this code will change...
+   set_vram_update(5,score_oam);
+ }
 }
 
 
 
 void main(void)
 {
-
+	// initialize read and write pointers to start of queue
+        vram_read_ptr = vram_queue;
+        vram_write_ptr = vram_queue;
 
         // --------------------------------------------------------------------------------------
         // PHASE 1:  TITLE SCREEN
@@ -765,8 +805,8 @@ void main(void)
 		spr=0;
 
 		spr=oam_spr(player_x,player_y,player_sprite,player_attribute, spr);
-                // show level and treasure and health
-                showStatusSprites(); // this updates spr
+                // perform VRAM queue processing
+                showStatusSprites();
 
                 // need to make sure we clear out dead enemies
 		//iterate over active enemies and set a sprite for current enemy
