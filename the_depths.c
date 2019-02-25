@@ -443,17 +443,19 @@ void fillRoom(signed char gridx, signed char gridy) {
       setAndDraw(sx,v,STONE);
       setAndDraw(ex-1,v,STONE);
   }
-  for(u=sx;u<ex;u++) {
+  for(u=sx+1;u<ex-1;u++) {
       setAndDraw(u,sy,STONE);
       setAndDraw(u,ey-1,STONE);
   }
 
+  // clear room tiles
   for(v=sy+1;v<ey-1;v++) {
     for(u=sx+1;u<ex-1;u++) {
       setAndDraw(u,v,EMPTY);
     }
   }
 
+  // add doors
   if ((room_grid[gridx][gridy] & TUNNEL_DOWN) == TUNNEL_DOWN) {
      // notch the floor
      setAndDraw(sx + (ROOM_WIDTH/2), ey-1, EMPTY);
@@ -471,6 +473,7 @@ void fillRoom(signed char gridx, signed char gridy) {
      setAndDraw(ex-1, sy + (ROOM_HEIGHT/2), EMPTY);
   }
 
+
   // last step we set the SPECIAL value to be in the middle of the room
   u = sx + (ROOM_WIDTH/2) - 1;
   v = sy + (ROOM_HEIGHT /2) - 1;
@@ -483,10 +486,10 @@ void fillRoom(signed char gridx, signed char gridy) {
   } else {
     setAndDraw(u,v,w);
   }
-  vram_adr(NTADR(u,v)); 
-  vram_put(grid[u][v]);
+
 }
 
+// This method must be invoked while ppu display is OFF
 void drawLevel(unsigned char target) {
   // EVERYTHING IS INITIALLY STONE BORDER AND FOG 
   for (j=0;j<LEVEL_HEIGHT;j++) {
@@ -598,8 +601,8 @@ void claimTreasure(unsigned char tx, unsigned char ty) {
 void revealRoom(unsigned char px, unsigned char py) {
   signed char roomX = ((px >> 3)-LEFT_BORDER) / ROOM_WIDTH; 
   signed char roomY = ((py >> 3)-TOP_BORDER) / ROOM_HEIGHT; 
-  sfx_play(REVEAL_ROOM_SOUND, REVEAL_ROOM_CHANNEL);
   fillRoom(roomX,roomY);
+  sfx_play(REVEAL_ROOM_SOUND, REVEAL_ROOM_CHANNEL);
 }
 
 void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
@@ -735,18 +738,23 @@ void updatePowerSprites(){
 }
 
 
+// This method updates chunks of vram
 void showStatusSprites(){
  if(vram_read_ptr != vram_write_ptr){
-   if(vram_read_ptr + 9 < vram_write_ptr){
+   if(vram_read_ptr + 15 <= vram_write_ptr){
+     // try 5 bytes
+     set_vram_update(5,vram_read_ptr);
+     vram_read_ptr += 15;
+   } else if(vram_read_ptr + 9 < vram_write_ptr){
+     // try 3 bytes
      set_vram_update(3,vram_read_ptr);
      vram_read_ptr += 9;
-   } else if(vram_read_ptr + 6 < vram_write_ptr){
-     set_vram_update(2,vram_read_ptr);
-     vram_read_ptr += 6;
    } else {
+     // do a single byte
      set_vram_update(1,vram_read_ptr);
      vram_read_ptr += 3;
    }
+   // handle wrap around
    if(vram_read_ptr > vram_queue + SIZEOF_QUEUE) {
      vram_read_ptr = vram_queue;
    }
