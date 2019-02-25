@@ -10,23 +10,25 @@ CFLAGS=-Oi
 
 .PHONY: all clean run
 
-objfiles= crt0.o utils.o $(GAME).o
+objfiles= asm/crt0.o asm/utils.o $(GAME).o
 SOURCES = $(GAME).c
 
 all: $(GAME).nes
 
 clean:
 	@rm -fv $(objfiles)
-	rm -f $(GAME).s
-	rm -f $(GAME).nes
+	@rm -f *.o	
+	@rm -f asm/*.o	
+	@rm -f $(GAME).s
+	@rm -f $(GAME).nes
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 $(GAME).nes: $(GAME).c
 	$(CC) $(CFLAGS) $(GAME).c --add-source
-	ca65 crt0.s
-	ca65 utils.s
+	ca65 asm/crt0.s
+	ca65 asm/utils.s
 	ca65 $(GAME).s
 	ld65 -o $(GAME).nes -C nes.cfg $(objfiles) nes.lib
 
