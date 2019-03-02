@@ -761,6 +761,10 @@ void showStatusSprites(){
  } else {
    // show the score.  this code will change...
    set_vram_update(5,score_oam);
+   // reset vram pointers, since this is more efficient than
+   // using the wrap around
+   vram_read_ptr = vram_queue;
+   vram_write_ptr = vram_queue;
  }
 }
 
