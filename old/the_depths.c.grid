@@ -17,9 +17,7 @@
 // ==================== CONSTANTS ============================================
 
 //  GAME FEATURES
-#define DEV_MODE 1
-// uncomment RAND_MODE to generate a new level after START is pressed
-//#define RAND_MODE 1
+//#define DEV_MODE 1
 
 #define FOG_MODE 1
 
@@ -33,10 +31,8 @@
 
 #define PLAYER_SPRITE 0x40
 #define PLAYER_ATTRIBUTE 0x00
-#define PLAYER_WIDTH 4
-#define PLAYER_HEIGHT 4
-#define X_OFFSET 2
-#define Y_OFFSET 2
+#define PLAYER_WIDTH 6
+#define PLAYER_HEIGHT 6
 
 // Special LEVELS
 #define SURFACE_LEVEL 1
@@ -45,24 +41,19 @@
 #define GAME_MODE 0
 #define INVENTORY_MODE 5
 
-//  LEVEL GENERATION CONSTANTS
-//   these should be moved to their own file to indicate which are tunable
-#define MAX_ROOM_ATTEMPTS 100
-#define MAX_ROOMS 10 
-#define MAX_ROOM_WIDTH 7
-#define MAX_ROOM_HEIGHT 7
-#define MIN_ROOM_WIDTH 3
-#define MIN_ROOM_HEIGHT 3
-// setting a border all the way around of 2 tiles
+// level vars
+#define TOP_BORDER 3
 #define LEFT_BORDER 2
-#define MAX_WIDTH 30
-#define TOP_BORDER 2
-#define MAX_HEIGHT 28
 
-// For horizontal scrolling there are 2 namestables
+// For horizontal scrolling, we can only support 2 nametables
+// and the grid is made up of 2x2 chars
+#ifdef SCROLLING_SUPPORTED
+#define LEVEL_WIDTH  32
+#define LEVEL_HEIGHT 15
+#else
 #define LEVEL_WIDTH  32
 #define LEVEL_HEIGHT 30
-
+#endif
 
 // individual rooms (includes the wall)
 #define ROOM_WIDTH  6
@@ -124,7 +115,7 @@
 // =========================== VARIABLES =========================================
 //generic vars
 static unsigned char spr;
-static unsigned char i,j,k;
+static unsigned char i,j;
 static unsigned char lastPad, pad;
 static unsigned char lastRoomX, lastRoomY;
 static unsigned char game_mode;
@@ -149,17 +140,14 @@ unsigned char vram_queue[SIZEOF_QUEUE];
 // large map for the active level
 unsigned char grid[LEVEL_WIDTH][LEVEL_HEIGHT];
 
-typedef struct
-{
-	unsigned char xmin;
-	unsigned char xmax;
-	unsigned char ymin;
-	unsigned char ymax;
-} Room;
+// smaller map for the rooms
+unsigned char room_grid[ROOMS_WIDE][ROOMS_HIGH];
 
-Room rooms[MAX_ROOMS];
-
-unsigned char num_rooms;
+// this data structure prevents stack overflow.
+// basically we use un-bound iteration instead of recursion
+static signed char crawlHead;
+static signed char crawlTail;
+unsigned char crawlStack[ROOMS_WIDE * ROOMS_HIGH * 2];
 
 
 
@@ -179,6 +167,37 @@ const unsigned char palSprites[16]={
 #define LEVEL_POSITION_Y 2
 #define NUM_LEVEL_SPRITES 3
 static unsigned char level_oam[NUM_LEVEL_SPRITES];
+
+// Starts placing the 5 digit score at coordinates: 8,2  .. 12,2
+// 2 treasure bytes means a max score of 64k (which is 5 digits)
+// If num treasure bytes increases, we need more digits for score
+#define LAST_SCORE_SPRITE_POS  14
+static unsigned char score_oam[5*3];
+const unsigned char score_placement[5*3]={
+        MSB(NTADR(8,2)),LSB(NTADR(8,2)),0,
+        MSB(NTADR(9,2)),LSB(NTADR(9,2)),0,
+        MSB(NTADR(10,2)),LSB(NTADR(10,2)),0,
+        MSB(NTADR(11,2)),LSB(NTADR(11,2)),0,
+        MSB(NTADR(12,2)),LSB(NTADR(12,2)),0,
+};
+
+// Starts placing the 2 digit health at coordinates: 14,2  .. 15,2
+#define LAST_HEALTH_SPRITE_POS  5
+static unsigned char health_oam[2*3];
+const unsigned char health_placement[2*3]={
+        MSB(NTADR(14,2)),LSB(NTADR(14,2)),0,
+        MSB(NTADR(15,2)),LSB(NTADR(15,2)),0,
+};
+
+// Starts placing the 2 digit health at coordinates: 18,2  .. 19,2
+#define LAST_POWER_SPRITE_POS  5
+static unsigned char power_oam[2*3];
+const unsigned char power_placement[2*3]={
+        MSB(NTADR(18,2)),LSB(NTADR(18,2)),0,
+        MSB(NTADR(19,2)),LSB(NTADR(19,2)),0,
+};
+
+
 
 // ======================= UNDER CONSTRUCTION =======================
 // ------------ MOB variables, constants and utility methods -------
@@ -212,6 +231,82 @@ void clearMobs(){
 
 
 
+void addCrawl(signed char gridx, signed char gridy) {
+  crawlStack[crawlTail] = gridx;
+  crawlTail++;
+  crawlStack[crawlTail] = gridy;
+  crawlTail++;
+}
+
+unsigned char canCreateRoom(signed char gridx, signed char gridy) {
+  if((gridx < 0) || (gridx >= ROOMS_WIDE)){
+     return FALSE;
+  }
+  if((gridy < 0) || (gridy >= ROOMS_HIGH)){
+     return FALSE;
+  }
+  // Return true if the lower 4 bits are still UNSET 
+  // the mask removes tunnel settings
+  return ((room_grid[gridx][gridy] & 0x0F) == UNSET );
+}
+
+void createRoom(signed char gridx, signed char gridy) {
+  unsigned char randDir = rand8() % 4;
+  unsigned char loop = 3;
+
+
+  lastRoomX = gridx;
+  lastRoomY = gridy;
+
+
+  while(loop > 0) {
+   loop--;
+   switch(randDir) {
+    case 0: 
+      // UP
+      if(canCreateRoom(gridx, gridy-1)) { 
+        room_grid[gridx][gridy]   |= TUNNEL_UP;
+        room_grid[gridx][gridy-1] &= 0xF0;  // strip lower 4 bits
+        room_grid[gridx][gridy-1] |= TUNNEL_DOWN;
+        room_grid[gridx][gridy-1] |= RANDOM;
+        addCrawl(gridx, gridy-1);
+      }
+      break;
+    case 1: 
+      // RIGHT
+      if(canCreateRoom(gridx+1, gridy)) { 
+        room_grid[gridx][gridy] |= TUNNEL_RIGHT;
+        room_grid[gridx+1][gridy] &= 0xF0;  // strip lower 4 bits
+        room_grid[gridx+1][gridy] |= TUNNEL_LEFT;
+        room_grid[gridx+1][gridy] |= RANDOM;
+        addCrawl(gridx+1, gridy);
+      }
+      break;
+    case 2:
+      // DOWN
+      if(canCreateRoom(gridx, gridy+1)) { 
+        room_grid[gridx][gridy] |= TUNNEL_DOWN;
+        room_grid[gridx][gridy+1] &= 0xF0;  // strip lower 4 bits
+        room_grid[gridx][gridy+1] |= TUNNEL_UP;
+        room_grid[gridx][gridy+1] |= RANDOM;
+        addCrawl(gridx, gridy+1);
+      }
+      break;
+    case 3:
+      // LEFT
+      if(canCreateRoom(gridx-1, gridy)) { 
+        room_grid[gridx][gridy] |= TUNNEL_LEFT;
+        room_grid[gridx-1][gridy] &= 0xF0;  // strip lower 4 bits
+        room_grid[gridx-1][gridy] |= TUNNEL_RIGHT;
+        room_grid[gridx-1][gridy] |= RANDOM;
+        addCrawl(gridx-1, gridy);
+      }
+      break;
+   }
+   randDir = (randDir + 1) % 4;
+   }
+}
+
 void updateLevelSprites(){
     // 3 digit level. 
     int x = level;
@@ -229,135 +324,79 @@ void updateLevelSprites(){
 
 }
 
-unsigned char checkBoxIntersection(unsigned char x1min, unsigned char y1min, unsigned char x1max, unsigned char y1max) {
-	unsigned char x2min, y2min, x2max, y2max;
-	for(j=0;j<num_rooms;j++){
-	    x2min = rooms[j].xmin;
-	    y2min = rooms[j].ymin;
-	    x2max = rooms[j].xmax;
-	    y2max = rooms[j].ymax;
-	    if ((x2min > x1max) || (x2max < x1min) || (y2min > y1max) || (y2max < y1min)) {
-		continue;
-            } else {
-                return TRUE;
-	    }
-	}
-	// none of the existing rooms overlap
-	return FALSE;
-}
-
-void drawCorridor(unsigned char x1,unsigned char y1, unsigned char x2, unsigned char y2)
-{
-    unsigned char lastMidX = x1;
-    unsigned char lastMidY = y1;
-    unsigned char nextMidX = x2;
-    unsigned char nextMidY = y2;
-
-    grid[lastMidX][lastMidY] = EMPTY;
-    while((lastMidX != nextMidX) || (lastMidY != nextMidY)) {
-      if(lastMidX > nextMidX) {
-        lastMidX--;
-      } else if(lastMidX < nextMidX){
-        lastMidX++;
-      } else if(lastMidY > nextMidY) {
-        lastMidY--;
+void updateTreasureSprites(){
+    // 5 digit health. 
+    int x = score;
+    signed char pos = LAST_SCORE_SPRITE_POS;
+    // always draw first digit
+    score_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
+    x = x / 10;
+    pos -=3;
+    // conditionally draw the rest
+    while(pos >=0 ) {
+      if ( x > 0 ) {
+         score_oam[pos] = NUMBER_SPRITE_OFFSET + (x % 10);
+         x = x / 10;
       } else {
-	lastMidY++;
+         score_oam[pos] = BLANK_SPRITE;
       }
-      grid[lastMidX][lastMidY] = EMPTY;
+      pos -=3;
     }
-
 }
+
+
 
 void generateLevel(unsigned char startObj, unsigned char endObj)
 {
-    unsigned char rx,ry,rw,rh;
-    unsigned char lastMidX,lastMidY,nextMidX,nextMidY;
-    // Temporary step: make the entire map stone.
-    // Will convert to metatiles to allow larger maps and scrolling
-    for (j=0;j<LEVEL_HEIGHT;j++) {
+  unsigned char startX = rand8() % ROOMS_WIDE;
+  unsigned char startY = rand8() % ROOMS_HIGH;
+
+        // STEP 1: stone border
+        for (j=0;j<LEVEL_HEIGHT;j++) {
+            grid[0][j] = STONE;
+            grid[LEVEL_WIDTH-1][j] = STONE;
+        }
         for (i=0;i<LEVEL_WIDTH;i++) {
-	    grid[i][j] = STONE;
-	}
-    }
+            grid[i][0] = STONE;
+            grid[i][LEVEL_HEIGHT-1] = STONE;
+        }
 
-    
-    // Step 1: generate rooms
-    // use k for room generation attempts 
-    // 0,0 is top left of screen
-    // rx = room top left X
-    // ry = room top left Y
-    // rw = room width
-    // rh = room height
-    num_rooms = 0;
-    level = 0;
+        // STEP 2: fog interior
+#ifdef FOG_MODE
+        for (j=1;j<LEVEL_HEIGHT-1;j++) {
+            for (i=1;i<LEVEL_WIDTH-1;i++) {
+                grid[i][j] = FOG_TILE;
+            }
+        }
+#endif
 
-    k=MAX_ROOM_ATTEMPTS;
-    while(k>0) {
-        k--;
-	rx = (rand8() % (MAX_WIDTH - MIN_ROOM_WIDTH)) + LEFT_BORDER;
-	rw = (rand8() % MAX_ROOM_WIDTH) + MIN_ROOM_WIDTH;
-	if ((rx + rw) > MAX_WIDTH) {
-            continue;
-	}
-	ry = (rand8() % (MAX_HEIGHT - MIN_ROOM_HEIGHT)) + TOP_BORDER;
-	rh = (rand8() % MAX_ROOM_HEIGHT) + MIN_ROOM_HEIGHT;
-	if ((ry + rh) > MAX_HEIGHT) {
-            continue;
-	}
-	// returns TRUE if these room values intersect an existing room
-	if (checkBoxIntersection(rx,ry,rx+rw,ry+rh) ){
-	    rand8();
-	    continue;
-	}
-	rooms[num_rooms].xmin = rx;
-	rooms[num_rooms].ymin = ry;
-	rooms[num_rooms].xmax = rx+rw;
-	rooms[num_rooms].ymax = ry+rh;
-	num_rooms++;
+        // Step 3: reset the room grid so the algorithm knows where to populate
+        for (j=0;j<ROOMS_HIGH;j++) {
+            for (i=0;i<ROOMS_WIDE;i++) {
+                room_grid[i][j] = UNSET;
+            }
+        }
 
-	if (num_rooms >= MAX_ROOMS){
-	  break;
-	}
-    }
+        // initialize start and end pointers for crawl array
+        crawlHead = 0;
+        crawlTail = 0;
+        // STEP 3: generate starting point
+        room_grid[startX][startY] = startObj;
+        createRoom(startX, startY);
+        while(crawlHead != crawlTail) {
+            startX = crawlStack[crawlHead];
+            crawlHead++;
+            startY = crawlStack[crawlHead];
+            crawlHead++; // this wraps 
+            createRoom(startX, startY);  
+        }
+        // the last room we reach is the stairs down
+        // Only set the lower portion of the grid
+        room_grid[lastRoomX][lastRoomY] &= 0xF0;
+        room_grid[lastRoomX][lastRoomY] |= endObj;
 
-    // temp.  Let me draw these rooms
-    for(k=0;k<num_rooms;k++){
-	rx = rooms[k].xmin;
-	ry = rooms[k].ymin;
-	rw = rooms[k].xmax;
-	rh = rooms[k].ymax;
-	// temporarily using the level variable to see how many rooms are created
-	// temporarily draw rooms here
-	for(j=ry;j<rh;j++) {
-	    for(i=rx;i<rw;i++) {
-                //grid[i][j] = NUMBER_SPRITE_OFFSET + k; // EMPTY;
-                grid[i][j] = EMPTY;
-	    }
-	}
-
-	if(k==0){
-	    player_x = (rx + 1) << 3 ;
-	    player_y = (ry + 1) << 3 ;
-            lastMidX = (rx+rw)/2;
-            lastMidY = (ry+rh)/2;
-	} else {
-	  // draw corridor from last mid to next mid
-          nextMidX = (rx+rw)/2;
-          nextMidY = (ry+rh)/2;
-	  drawCorridor(lastMidX,lastMidY,nextMidX,nextMidY);
-          lastMidX = nextMidX;
-          lastMidY = nextMidY;
-	}
-    }
-
-    // Step 2: generate corridors
-    // temp. I will simply create a corridor between each room in order
-
-    // draw static text
-    updateLevelSprites();
-
-    // set the player somewhere..
+        // draw static text
+        updateLevelSprites();
 }
 
 
@@ -391,8 +430,72 @@ unsigned char getRandomItem() {
   
 }
 
+void fillRoom(signed char gridx, signed char gridy) {
+
+  // set the bottom right corner of the room (not including wall)
+  unsigned char sx = (gridx * ROOM_WIDTH) + LEFT_BORDER;
+  unsigned char sy = (gridy * ROOM_HEIGHT) + TOP_BORDER;
+  unsigned char ex = sx + ROOM_WIDTH;
+  unsigned char ey = sy + ROOM_HEIGHT;
+
+  unsigned char u,v,w;
+
+  // do not use I or J
+
+  // draw outer border of stone
+  for(v=sy;v<ey;v++) {
+      setAndDraw(sx,v,STONE);
+      setAndDraw(ex-1,v,STONE);
+  }
+  for(u=sx+1;u<ex-1;u++) {
+      setAndDraw(u,sy,STONE);
+      setAndDraw(u,ey-1,STONE);
+  }
+
+  // clear room tiles
+  for(v=sy+1;v<ey-1;v++) {
+    for(u=sx+1;u<ex-1;u++) {
+      setAndDraw(u,v,EMPTY);
+    }
+  }
+
+  // add doors
+  if ((room_grid[gridx][gridy] & TUNNEL_DOWN) == TUNNEL_DOWN) {
+     // notch the floor
+     setAndDraw(sx + (ROOM_WIDTH/2), ey-1, EMPTY);
+  }
+  if ((room_grid[gridx][gridy] & TUNNEL_UP) == TUNNEL_UP) {
+     // notch the ceiling
+     setAndDraw(sx + (ROOM_WIDTH/2), sy, EMPTY);
+  }
+  if ((room_grid[gridx][gridy] & TUNNEL_LEFT) == TUNNEL_LEFT) {
+     // notch the left
+     setAndDraw(sx, sy + (ROOM_HEIGHT/2), EMPTY);
+  }
+  if ((room_grid[gridx][gridy] & TUNNEL_RIGHT) == TUNNEL_RIGHT) {
+     // notch the right
+     setAndDraw(ex-1, sy + (ROOM_HEIGHT/2), EMPTY);
+  }
+
+
+  // last step we set the SPECIAL value to be in the middle of the room
+  u = sx + (ROOM_WIDTH/2) - 1;
+  v = sy + (ROOM_HEIGHT /2) - 1;
+  w = room_grid[gridx][gridy] & 0x0F;
+  if (w == RANDOM) {
+    // clear the random value
+    room_grid[gridx][gridy] = EMPTY;
+    // calculate what the new item is
+    setAndDraw(u,v,getRandomItem());
+  } else {
+    setAndDraw(u,v,w);
+  }
+
+}
+
 // This method must be invoked while ppu display is OFF
 void drawLevel(unsigned char target) {
+  // EVERYTHING IS INITIALLY STONE BORDER AND FOG 
   for (j=0;j<LEVEL_HEIGHT;j++) {
     for (i=0;i<LEVEL_WIDTH;i++) {
       vram_adr(NTADR(i,j)); // left border
@@ -405,11 +508,28 @@ void drawLevel(unsigned char target) {
   player_sprite = PLAYER_SPRITE;  
   player_attribute=PLAYER_ATTRIBUTE;
 
+  for (j=0;j<ROOMS_HIGH;j++) {
+     for (i=0;i<ROOMS_WIDE;i++) {
+        if(( room_grid[i][j] & 0x0F) == target) {
+           player_x = 8*(LEFT_BORDER + (i*ROOM_WIDTH) + (ROOM_WIDTH / 2)- 1);
+           player_y = 8*(TOP_BORDER + (j*ROOM_HEIGHT) + (ROOM_HEIGHT / 2));
+#ifdef FOG_MODE
+           // this only draws one room. the rest are fogged
+           fillRoom(i, j);
+           break;
+        }
+#else
+        }
+        // this draws all rooms. fog disabled 
+        fillRoom(i, j);
+#endif
+     }
+  }
   // Draw text info:
-  //vram_adr(NTADR(LEVEL_POSITION_X, LEVEL_POSITION_Y));
-  //for(j=0; j<NUM_LEVEL_SPRITES; j++) {
-  //    vram_put(level_oam[j]);
-  //}
+  vram_adr(NTADR(LEVEL_POSITION_X, LEVEL_POSITION_Y));
+  for(j=0; j<NUM_LEVEL_SPRITES; j++) {
+      vram_put(level_oam[j]);
+  }
     
 }
 
@@ -427,6 +547,8 @@ void loadLevel(unsigned char startObj, unsigned char endObj)
    generateLevel(startObj, endObj);
    drawLevel(startObj);
 
+   // Update score sprites
+   set_vram_update(5,score_oam);
    ppu_on_all();
    sfx_play(LEVEL_SOUND, LEVEL_CHANNEL);
 }
@@ -440,7 +562,6 @@ void generateNextLevel() {
   level+=1;
   loadLevel(STAIRS_UP, STAIRS_DOWN);
 }
-
 void generatePreviousLevel() {
   level-=1;
   if (level == SURFACE_LEVEL) {
@@ -465,25 +586,8 @@ void gameOver() {
 	reset();
 }
 
-// Check (x,y)  and (x,y+height)
-// Return whichever is not EMPTY
-unsigned char clipCheckX(unsigned char x, unsigned char y) {
-  unsigned char p1 = grid[x>>3][y>>3];
-  if(p1 == EMPTY) {
-      return grid[x>>3][(y+PLAYER_HEIGHT)>>3];
-  } else {
-      return p1;
-  }
-}
-// Check (x,y)  and (x+width,y)
-// Return whichever is not EMPTY
-unsigned char clipCheckY(unsigned char x, unsigned char y) {
-  unsigned char p1 = grid[x>>3][y>>3];
-  if(p1 == EMPTY) {
-      return grid[(x+PLAYER_WIDTH)>>3][y>>3];
-  } else {
-      return p1;
-  }
+unsigned char clipCheck(unsigned char x, unsigned char y) {
+  return grid[x>>3][y>>3];
 }
 
 
@@ -493,12 +597,17 @@ void claimTreasure(unsigned char tx, unsigned char ty) {
   // clear the treasure from the screen
   setAndDraw(tx,ty,EMPTY);
   // update the overall amount of gold the player has
-  //updateTreasure();
-  
+  updateTreasureSprites();
   // indicate using sound that we got some treasure
   sfx_play(TREASURE_SOUND, TREASURE_CHANNEL);
 }
 
+void revealRoom(unsigned char px, unsigned char py) {
+  signed char roomX = ((px >> 3)-LEFT_BORDER) / ROOM_WIDTH; 
+  signed char roomY = ((py >> 3)-TOP_BORDER) / ROOM_HEIGHT; 
+  fillRoom(roomX,roomY);
+  sfx_play(REVEAL_ROOM_SOUND, REVEAL_ROOM_CHANNEL);
+}
 
 void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
   switch(val) {
@@ -509,7 +618,7 @@ void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
     generateNextLevel();
     break;
    case FOG_TILE:
-     // revealRoom(px,py);
+     revealRoom(px,py);
     break;
    case TREASURE:
     claimTreasure(px>>3, py>>3);
@@ -518,40 +627,40 @@ void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
 }
 
 
-// may need to add additional clip checks rather than right single points
+// CLIPPING should be based on the FEET (bottom CENTER) of the player
 void moveLeft(void) 
 {
-  unsigned char val = clipCheckX(player_x - STEP, player_y);
+  unsigned char val = clipCheck(player_x - STEP, player_y + PLAYER_HEIGHT);
   if (val != STONE) {
      player_x-=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x, player_y + PLAYER_HEIGHT, val);
   }
 }
 
 void moveRight(void) 
 {
-  unsigned char val = clipCheckX(player_x + PLAYER_WIDTH + STEP, player_y);
+  unsigned char val = clipCheck(player_x + STEP + PLAYER_WIDTH, player_y + PLAYER_HEIGHT);
   if (val != STONE) {
      player_x+=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x + PLAYER_WIDTH, player_y + PLAYER_HEIGHT, val);
   }
 }
 
 void moveUp(void) 
 {
-  unsigned char val = clipCheckY(player_x, player_y-STEP);
+  unsigned char val = clipCheck(player_x + (PLAYER_WIDTH/2), player_y + PLAYER_HEIGHT-STEP);
   if (val != STONE) {
      player_y-=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x + (PLAYER_WIDTH/2), player_y + PLAYER_HEIGHT, val);
   }
 }
 
 void moveDown(void) 
 {
-  unsigned char val = clipCheckY(player_x, player_y+PLAYER_HEIGHT+STEP);
+  unsigned char val = clipCheck(player_x + (PLAYER_WIDTH/2), player_y+STEP+PLAYER_HEIGHT);
   if (val != STONE) {
      player_y+=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x + (PLAYER_WIDTH/2), player_y + PLAYER_HEIGHT, val);
   }
 }
 
@@ -567,10 +676,6 @@ void processInventory(void)
     // other controls manipulate inventory
     if (pad & PAD_START) {
         game_mode = GAME_MODE;
-#ifdef DEV_MODE
-	// load a new level
-        generateNextLevel(); 
-#endif
     }
 }
 
@@ -608,6 +713,37 @@ void processGame() {
 
 }
 
+void updateHealthSprites(){
+    // 2 digit health. 
+    int x = player_health;
+    signed char pos = LAST_HEALTH_SPRITE_POS;
+    while( x >= 10 ) {
+       health_oam[pos] = HEALTH_SPRITE_OFFSET + x % 10;
+       x = x / 10;
+       pos -=3;
+    }
+    while(pos >= 0) {
+       health_oam[pos] = BLANK_HEALTH;
+       pos -=3;
+    }
+}
+
+void updatePowerSprites(){
+    // 2 digit power. 
+    int x = player_power;
+    signed char pos = LAST_POWER_SPRITE_POS;
+    while( x >= 10 ) {
+       power_oam[pos] = POWER_SPRITE_OFFSET + x % 10;
+       x = x / 10;
+       pos -=3;
+    }
+    while(pos >= 0) {
+       power_oam[pos] = BLANK_POWER;
+       pos -=3;
+    }
+}
+
+
 // This method updates chunks of vram
 void showStatusSprites(){
  if(vram_read_ptr != vram_write_ptr){
@@ -629,7 +765,10 @@ void showStatusSprites(){
      vram_read_ptr = vram_queue;
    }
  } else {
-   // reset the rotating queue
+   // show the score.  this code will change...
+   set_vram_update(5,score_oam);
+   // reset vram pointers, since this is more efficient than
+   // using the wrap around
    vram_read_ptr = vram_queue;
    vram_write_ptr = vram_queue;
  }
@@ -663,24 +802,14 @@ void main(void)
         player_power = INITIAL_POWER;
         score = 0;
 
+        // score changes as we run around the level
+        memcpy(score_oam,score_placement,sizeof(score_placement));
+
         // setup palette
         ppu_on_all();
 	pal_spr(palSprites);
         pal_bg(palSprites);
 
-#ifdef RAND_MODE
-	// this code regenerate random number generator over and over
-	//  under start button is pressed.
-	while(1) {
-		ppu_waitnmi();//wait for next TV frame
-                lastPad = pad;
-                pad = pad_poll(0);
-		rand8();
-                if (pad & PAD_START) {
-			break;
-		}
-	}
-#endif
 
         generateStartingLevel();
 
@@ -692,11 +821,8 @@ void main(void)
                 // -- game loop --
 		ppu_waitnmi();//wait for next TV frame
 		spr=0;
-		spr=oam_spr(player_x - X_OFFSET,
-			  player_y + Y_OFFSET - PLAYER_HEIGHT,
-			  player_sprite,
-			  player_attribute,
-			  spr);
+
+		spr=oam_spr(player_x,player_y,player_sprite,player_attribute, spr);
                 // perform VRAM queue processing
                 showStatusSprites();
 

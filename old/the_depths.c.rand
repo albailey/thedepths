@@ -18,8 +18,6 @@
 
 //  GAME FEATURES
 #define DEV_MODE 1
-// uncomment RAND_MODE to generate a new level after START is pressed
-//#define RAND_MODE 1
 
 #define FOG_MODE 1
 
@@ -33,10 +31,8 @@
 
 #define PLAYER_SPRITE 0x40
 #define PLAYER_ATTRIBUTE 0x00
-#define PLAYER_WIDTH 4
-#define PLAYER_HEIGHT 4
-#define X_OFFSET 2
-#define Y_OFFSET 2
+#define PLAYER_WIDTH 6
+#define PLAYER_HEIGHT 6
 
 // Special LEVELS
 #define SURFACE_LEVEL 1
@@ -47,10 +43,10 @@
 
 //  LEVEL GENERATION CONSTANTS
 //   these should be moved to their own file to indicate which are tunable
-#define MAX_ROOM_ATTEMPTS 100
-#define MAX_ROOMS 10 
-#define MAX_ROOM_WIDTH 7
-#define MAX_ROOM_HEIGHT 7
+#define MAX_ROOM_ATTEMPTS 80
+#define MAX_ROOMS 10
+#define MAX_ROOM_WIDTH 9
+#define MAX_ROOM_HEIGHT 9
 #define MIN_ROOM_WIDTH 3
 #define MIN_ROOM_HEIGHT 3
 // setting a border all the way around of 2 tiles
@@ -236,12 +232,11 @@ unsigned char checkBoxIntersection(unsigned char x1min, unsigned char y1min, uns
 	    y2min = rooms[j].ymin;
 	    x2max = rooms[j].xmax;
 	    y2max = rooms[j].ymax;
-	    if ((x2min > x1max) || (x2max < x1min) || (y2min > y1max) || (y2max < y1min)) {
-		continue;
-            } else {
+	    if (x1min < x2max && x2min < x1max && y1min < y2max && y2min < y1max) {
                 return TRUE;
 	    }
 	}
+	level++;
 	// none of the existing rooms overlap
 	return FALSE;
 }
@@ -307,7 +302,6 @@ void generateLevel(unsigned char startObj, unsigned char endObj)
 	}
 	// returns TRUE if these room values intersect an existing room
 	if (checkBoxIntersection(rx,ry,rx+rw,ry+rh) ){
-	    rand8();
 	    continue;
 	}
 	rooms[num_rooms].xmin = rx;
@@ -465,25 +459,8 @@ void gameOver() {
 	reset();
 }
 
-// Check (x,y)  and (x,y+height)
-// Return whichever is not EMPTY
-unsigned char clipCheckX(unsigned char x, unsigned char y) {
-  unsigned char p1 = grid[x>>3][y>>3];
-  if(p1 == EMPTY) {
-      return grid[x>>3][(y+PLAYER_HEIGHT)>>3];
-  } else {
-      return p1;
-  }
-}
-// Check (x,y)  and (x+width,y)
-// Return whichever is not EMPTY
-unsigned char clipCheckY(unsigned char x, unsigned char y) {
-  unsigned char p1 = grid[x>>3][y>>3];
-  if(p1 == EMPTY) {
-      return grid[(x+PLAYER_WIDTH)>>3][y>>3];
-  } else {
-      return p1;
-  }
+unsigned char clipCheck(unsigned char x, unsigned char y) {
+  return grid[x>>3][y>>3];
 }
 
 
@@ -521,37 +498,37 @@ void handleInteraction(unsigned char px, unsigned char py, unsigned char val) {
 // may need to add additional clip checks rather than right single points
 void moveLeft(void) 
 {
-  unsigned char val = clipCheckX(player_x - STEP, player_y);
+  unsigned char val = clipCheck(player_x - STEP, player_y + PLAYER_HEIGHT);
   if (val != STONE) {
      player_x-=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x, player_y + PLAYER_HEIGHT, val);
   }
 }
 
 void moveRight(void) 
 {
-  unsigned char val = clipCheckX(player_x + PLAYER_WIDTH + STEP, player_y);
+  unsigned char val = clipCheck(player_x + PLAYER_WIDTH + STEP, player_y + PLAYER_HEIGHT);
   if (val != STONE) {
      player_x+=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x + PLAYER_WIDTH, player_y + PLAYER_HEIGHT, val);
   }
 }
 
 void moveUp(void) 
 {
-  unsigned char val = clipCheckY(player_x, player_y-STEP);
+  unsigned char val = clipCheck(player_x, player_y-STEP);
   if (val != STONE) {
      player_y-=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x + (PLAYER_WIDTH/2), player_y + PLAYER_HEIGHT, val);
   }
 }
 
 void moveDown(void) 
 {
-  unsigned char val = clipCheckY(player_x, player_y+PLAYER_HEIGHT+STEP);
+  unsigned char val = clipCheck(player_x, player_y+PLAYER_HEIGHT+STEP);
   if (val != STONE) {
      player_y+=STEP;
-     handleInteraction(player_x, player_y, val);
+     handleInteraction(player_x + (PLAYER_WIDTH/2), player_y + PLAYER_HEIGHT, val);
   }
 }
 
@@ -668,7 +645,8 @@ void main(void)
 	pal_spr(palSprites);
         pal_bg(palSprites);
 
-#ifdef RAND_MODE
+	/*
+#ifdef DEV_MODE
 	// this code regenerate random number generator over and over
 	//  under start button is pressed.
 	while(1) {
@@ -681,6 +659,7 @@ void main(void)
 		}
 	}
 #endif
+	*/
 
         generateStartingLevel();
 
@@ -692,11 +671,8 @@ void main(void)
                 // -- game loop --
 		ppu_waitnmi();//wait for next TV frame
 		spr=0;
-		spr=oam_spr(player_x - X_OFFSET,
-			  player_y + Y_OFFSET - PLAYER_HEIGHT,
-			  player_sprite,
-			  player_attribute,
-			  spr);
+
+		spr=oam_spr(player_x,player_y,player_sprite,player_attribute, spr);
                 // perform VRAM queue processing
                 showStatusSprites();
 
